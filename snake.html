@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Jogo da Cobra</title>
+<style>
+:root{
+  --bg:#dfe8d2;--panel:#cdd9bd;--ink:#1f2a1a;--muted:#4d5d44;--grid:rgba(31,42,26,.07);
+  --snake:#2d4a22;--head:#16300f;--food:#b3412b;--edge:#2d4a22;--btn:#c2d0b0;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1a13;--panel:#16251b;--ink:#dff0d3;--muted:#8fa883;--grid:rgba(223,240,211,.06);
+    --snake:#8fd16a;--head:#c6f5a6;--food:#ff7a59;--edge:#8fd16a;--btn:#1f3326;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1a13;--panel:#16251b;--ink:#dff0d3;--muted:#8fa883;--grid:rgba(223,240,211,.06);
+  --snake:#8fd16a;--head:#c6f5a6;--food:#ff7a59;--edge:#8fd16a;--btn:#1f3326;color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px);box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font:16px/1.4 ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"Courier New",monospace;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:12px;
+  overflow:hidden;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+header{width:min(92vw,56vh,480px);display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+h1{margin:0;font-size:1.25rem;letter-spacing:.02em}
+.stat{font-size:.95rem;color:var(--muted)}
+.stat b{color:var(--ink);font-size:1.15rem;font-variant-numeric:tabular-nums}
+#wrap{position:relative;width:min(92vw,56vh,480px);aspect-ratio:1;border:3px solid var(--edge);border-radius:6px;background:var(--panel)}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  text-align:center;padding:16px;background:color-mix(in srgb,var(--bg) 82%,transparent)}
+#ov[hidden]{display:none}
+#ovt{margin:0;font-size:1.6rem}
+#ovm{margin:0;color:var(--muted);max-width:30ch}
+button{font:inherit;color:var(--ink);background:var(--btn);border:2px solid var(--edge);border-radius:8px;
+  padding:10px 18px;cursor:pointer;touch-action:manipulation}
+button:active{transform:translateY(1px)}
+button:focus-visible{outline:3px solid var(--food);outline-offset:2px}
+#act{font-weight:700;padding:12px 28px}
+.bar{width:min(92vw,56vh,480px);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.hint{font-size:.8rem;color:var(--muted)}
+#pad{display:none;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(2,64px);gap:8px}
+#pad button{padding:0;font-size:1.6rem;display:flex;align-items:center;justify-content:center}
+#pad [data-d=u]{grid-column:2;grid-row:1}
+#pad [data-d=l]{grid-column:1;grid-row:2}
+#pad [data-d=d]{grid-column:2;grid-row:2}
+#pad [data-d=r]{grid-column:3;grid-row:2}
+@media (hover:none),(pointer:coarse){#pad{display:grid}.hint{display:none}}
+@media (max-height:620px) and (hover:none){#pad{grid-template-columns:repeat(3,54px);grid-template-rows:repeat(2,54px)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Cobra</h1>
+  <div class="stat">Pontos <b id="sc">0</b> &nbsp; Recorde <b id="hi">0</b></div>
+</header>
+<div id="wrap">
+  <canvas id="cv" aria-label="Tabuleiro do jogo da cobra" role="img"></canvas>
+  <div id="ov">
+    <h2 id="ovt">Jogo da Cobra</h2>
+    <p id="ovm"></p>
+    <button id="act" type="button">Jogar</button>
+  </div>
+</div>
+<div class="bar">
+  <span class="hint">Setas ou WASD: mover · Espaço: pausar</span>
+  <button id="pz" type="button">Pausar</button>
+</div>
+<div id="pad" aria-label="Controles">
+  <button type="button" data-d="u" aria-label="Cima">▲</button>
+  <button type="button" data-d="l" aria-label="Esquerda">◀</button>
+  <button type="button" data-d="d" aria-label="Baixo">▼</button>
+  <button type="button" data-d="r" aria-label="Direita">▶</button>
+</div>
+<script>
+(function(){
+"use strict";
+var N=20, MAXQ=2, KEY="cobra.recorde.v1";
+var cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+var ov=document.getElementById("ov"), ovt=document.getElementById("ovt"), ovm=document.getElementById("ovm");
+var act=document.getElementById("act"), pz=document.getElementById("pz");
+var scEl=document.getElementById("sc"), hiEl=document.getElementById("hi");
+var DIRS={u:{x:0,y:-1},d:{x:0,y:1},l:{x:-1,y:0},r:{x:1,y:0}};
+var snake,dir,queue,food,score,best=0,state="ready",acc=0,last=0,cell=0,col={};
+
+/* Recorde: leitura validada (nunca confia no valor armazenado) */
+try{var v=Number(localStorage.getItem(KEY));if(Number.isInteger(v)&&v>=0&&v<=N*N)best=v;}catch(e){}
+hiEl.textContent=String(best);
+
+function readColors(){
+  var s=getComputedStyle(document.documentElement);
+  ["grid","snake","head","food","panel","edge"].forEach(function(k){col[k]=s.getPropertyValue("--"+k).trim();});
+}
+function resize(){
+  var d=Math.min(window.devicePixelRatio||1,3), w=Math.max(1,Math.round(cv.clientWidth*d));
+  cv.width=w;cv.height=w;cell=w/N;draw();
+}
+function interval(){return Math.max(65,140-score*3);}
+
+function reset(){
+  snake=[{x:10,y:10},{x:9,y:10},{x:8,y:10}];
+  dir=DIRS.r;queue=[];score=0;acc=0;
+  scEl.textContent="0";placeFood();
+}
+function placeFood(){
+  var occ={},free=[],i,x,y;
+  for(i=0;i<snake.length;i++)occ[snake[i].x+","+snake[i].y]=1;
+  for(y=0;y<N;y++)for(x=0;x<N;x++)if(!occ[x+","+y])free.push({x:x,y:y});
+  food=free.length?free[Math.floor(Math.random()*free.length)]:null;
+}
+function show(title,msg,btn){
+  ovt.textContent=title;ovm.textContent=msg;act.textContent=btn;ov.hidden=false;
+}
+function start(){
+  if(state==="ready"||state==="over"||state==="won"){reset();}
+  state="running";ov.hidden=true;last=performance.now();pz.textContent="Pausar";
+}
+function pause(){
+  if(state!=="running")return;
+  state="paused";pz.textContent="Continuar";
+  show("Pausado","Toque em continuar ou aperte Espaço.","Continuar");
+}
+function resume(){
+  if(state!=="paused")return;
+  state="running";ov.hidden=true;last=performance.now();acc=0;pz.textContent="Pausar";
+}
+function primary(){
+  if(state==="running")pause();
+  else if(state==="paused")resume();
+  else start();
+}
+function finish(won){
+  state=won?"won":"over";pz.textContent="Pausar";
+  if(score>best){
+    best=score;hiEl.textContent=String(best);
+    try{localStorage.setItem(KEY,String(best));}catch(e){}
+  }
+  show(won?"Você venceu!":"Fim de jogo",
+       "Pontos: "+score+(score>=best&&score>0?" (novo recorde!)":"")+".","Jogar de novo");
+  draw();
+}
+function turn(name){
+  var d=DIRS[name];if(!d)return;
+  if(state==="ready"||state==="over"||state==="won"){
+    if(d===DIRS.l&&state==="ready")return;
+    start();
+  }
+  if(state!=="running")return;
+  var ref=queue.length?queue[queue.length-1]:dir;
+  if(d===ref||(d.x===-ref.x&&d.y===-ref.y))return;  /* ignora repetida e reversão de 180° */
+  if(queue.length<MAXQ)queue.push(d);
+}
+function step(){
+  if(queue.length)dir=queue.shift();
+  var h={x:snake[0].x+dir.x,y:snake[0].y+dir.y},i;
+  if(h.x<0||h.y<0||h.x>=N||h.y>=N){finish(false);return;}
+  var eat=food&&h.x===food.x&&h.y===food.y;
+  var limit=eat?snake.length:snake.length-1;  /* a ponta da cauda libera a casa ao andar */
+  for(i=0;i<limit;i++)if(snake[i].x===h.x&&snake[i].y===h.y){finish(false);return;}
+  snake.unshift(h);
+  if(eat){
+    score++;scEl.textContent=String(score);
+    if(snake.length>=N*N){food=null;finish(true);return;}
+    placeFood();
+  }else snake.pop();
+}
+function rect(x,y,pad,color,r){
+  var s=cell,p=pad*s,X=Math.round(x*s+p),Y=Math.round(y*s+p),S=Math.round((x+1)*s-p)-X;
+  ctx.fillStyle=color;
+  if(r&&ctx.roundRect){ctx.beginPath();ctx.roundRect(X,Y,S,Math.round((y+1)*s-p)-Y,r*s);ctx.fill();}
+  else ctx.fillRect(X,Y,S,Math.round((y+1)*s-p)-Y);
+}
+function draw(){
+  if(!snake)reset();
+  ctx.fillStyle=col.panel;ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.fillStyle=col.grid;
+  for(var i=0;i<N;i++)for(var j=0;j<N;j++)if((i+j)%2===0)ctx.fillRect(Math.round(i*cell),Math.round(j*cell),Math.ceil(cell),Math.ceil(cell));
+  if(food)rect(food.x,food.y,.18,col.food,.5);
+  for(var k=snake.length-1;k>=0;k--)rect(snake[k].x,snake[k].y,k?.07:.04,k?col.snake:col.head,.2);
+}
+function frame(t){
+  if(state==="running"){
+    acc+=Math.min(t-last,250);last=t;
+    while(acc>=interval()&&state==="running"){acc-=interval();step();}
+  }
+  draw();requestAnimationFrame(frame);
+}
+
+/* Teclado */
+var MAP={ArrowUp:"u",ArrowDown:"d",ArrowLeft:"l",ArrowRight:"r",w:"u",s:"d",a:"l",d:"r",W:"u",S:"d",A:"l",D:"r"};
+window.addEventListener("keydown",function(e){
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  if(MAP[e.key]){e.preventDefault();if(!e.repeat||state==="running")turn(MAP[e.key]);return;}
+  if(e.key===" "||e.key==="Enter"||e.key==="p"||e.key==="P"){
+    if(e.target&&e.target.tagName==="BUTTON"&&(e.key===" "||e.key==="Enter"))return;
+    e.preventDefault();if(!e.repeat)primary();
+  }
+});
+/* Botões na tela */
+Array.prototype.forEach.call(document.querySelectorAll("#pad button"),function(b){
+  b.addEventListener("pointerdown",function(e){e.preventDefault();turn(b.getAttribute("data-d"));});
+  b.addEventListener("contextmenu",function(e){e.preventDefault();});
+});
+act.addEventListener("click",function(){primary();act.blur();});
+pz.addEventListener("click",function(){
+  if(state==="running")pause();else if(state==="paused")resume();else start();
+  pz.blur();
+});
+/* Deslizar o dedo sobre o tabuleiro */
+var sx=0,sy=0,sw=false;
+cv.addEventListener("pointerdown",function(e){sx=e.clientX;sy=e.clientY;sw=true;});
+cv.addEventListener("pointermove",function(e){
+  if(!sw)return;
+  var dx=e.clientX-sx,dy=e.clientY-sy;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<22)return;
+  turn(Math.abs(dx)>Math.abs(dy)?(dx>0?"r":"l"):(dy>0?"d":"u"));
+  sx=e.clientX;sy=e.clientY;
+});
+["pointerup","pointercancel","pointerleave"].forEach(function(n){cv.addEventListener(n,function(){sw=false;});});
+/* Pausa automática ao sair da aba */
+document.addEventListener("visibilitychange",function(){if(document.hidden)pause();});
+window.addEventListener("blur",pause);
+/* Tema e tamanho */
+window.addEventListener("resize",resize);
+try{window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",function(){readColors();draw();});}catch(e){}
+
+reset();readColors();
+ovm.textContent="Coma a comida e não bata nas paredes nem em você mesmo.";
+resize();requestAnimationFrame(function(t){last=t;frame(t);});
+})();
+</script>
+</body>
+</html>
